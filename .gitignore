@@ -7,6 +7,14 @@ data_local
 .vscode
 _wandb
 
+#add 1214
+ckpt*
+dataset_dir
+*.npy
+*.png
+*.mp4
+*.ckpt
+
 **/.DS_Store
 
 fuse.cfg
