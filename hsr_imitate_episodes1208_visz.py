@@ -10,7 +10,7 @@ from einops import rearrange
 
 from hsr_constants_visz import DT
 from hsr_constants_visz import PUPPET_GRIPPER_JOINT_OPEN
-from hsr_utils_visz import load_data # data functions
+from hsr_utils_visz import load_data ,load_data_with_logging  # data functions
 from hsr_utils_visz import sample_box_pose, sample_insertion_pose # robot functions
 from hsr_utils_visz import compute_dict_mean, set_seed, detach_dict # helper functions
 from hsr_policy_visz import ACTPolicy, CNNMLPPolicy
@@ -128,9 +128,15 @@ def main(args):
         'real_robot': not is_sim
     }
 
-    
+    log_file_train = os.path.join(ckpt_dir, f"train_shuffle_log.txt")
+    log_file_val = os.path.join(ckpt_dir, f"val_shuffle_log.txt")
 
-    train_dataloader, val_dataloader, stats, _ = load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val)
+    # train_dataloader, val_dataloader, stats, _ = load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val)
+
+    train_dataloader, val_dataloader, stats = load_data_with_logging(
+        dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val, 
+        log_file_train, log_file_val
+    )
 
     if is_eval:
         ckpt_names = [f'policy_best.ckpt']
@@ -325,7 +331,12 @@ def eval_bc(val_dataloader, config, ckpt_name, save_episode=True):
                 # ポリシーのクエリ
                 if policy_class == "ACT":
                     # all_actions, mu, logvar = policy(qpos, curr_image, actions=actions, is_pad=is_pad[:, :t+1])
-                    all_actions, mu, logvar = policy(qpos, curr_image, actions=actions, is_pad=is_pad)
+                    results = policy(qpos, curr_image, actions=actions, is_pad=is_pad)
+                    
+                    # all_actions, mu, logvar = policy(qpos, curr_image, actions=actions, is_pad=is_pad)
+                    all_actions = results['a_hat']
+                    mu = results['mu']
+                    logvar = results['logvar']
                     batch_mu_list.append(mu.cpu().numpy())
                     batch_logvar_list.append(logvar.cpu().numpy())
 
@@ -342,11 +353,11 @@ def eval_bc(val_dataloader, config, ckpt_name, save_episode=True):
                 #           config['policy_config']['action_mean'])
                 # reward = compute_reward(action)  # 必要に応じて報酬計算関数を追加
                 # batch_rewards.append(reward)
-            print(t,'tGGG')
 
             # 結果を保存
             batch_mu_list = np.array(batch_mu_list)
             batch_logvar_list = np.array(batch_logvar_list)
+            print('batchsave')
             np.save(os.path.join(z_output_dir, f"mu_batch_{batch_idx}.npy"), batch_mu_list)
             np.save(os.path.join(z_output_dir, f"logvar_batch_{batch_idx}.npy"), batch_logvar_list)
 
@@ -610,13 +621,10 @@ def train_bc(train_dataloader, val_dataloader, config):
 
             # qpos_data, image_data, action_data, is_pad = data
 
-            # a_hat,  is_pad_hat, (mu, logvar)= policy(qpos_data, image_data, action_data, is_pad)
-
-            # #mu,logvarの保存
-            # if epoch == num_epochs-1:
-            #     print('num_epochs-1:',num_epochs-1)
-            #     mu_list.append(mu.cpu().numpy())
-            #     logvar_list.append(mu.cpu().numpy())
+            mu = forward_dict['mu']
+            logvar = forward_dict['logvar']
+            mu_list.append(mu.cpu().detach().numpy())
+            logvar_list.append(logvar.cpu().detach().numpy())
 
             # backward
             loss = forward_dict['loss']
@@ -625,7 +633,7 @@ def train_bc(train_dataloader, val_dataloader, config):
             optimizer.zero_grad()
             # print(f"Epoch {epoch}, Batch {batch_idx}, forward_dict: {forward_dict}")
             train_history.append(detach_dict(forward_dict))
-        print(f"Epoch {epoch}, Batch {batch_idx}, train_history slice: {train_history[(batch_idx + 1) * epoch: (batch_idx + 1) * (epoch + 1)]}")
+        # print(f"Epoch {epoch}, Batch {batch_idx}, train_history slice: {train_history[(batch_idx + 1) * epoch: (batch_idx + 1) * (epoch + 1)]}")
 
         epoch_summary ,a_hat= compute_dict_mean(train_history[(batch_idx+1)*epoch:(batch_idx+1)*(epoch+1)])
         epoch_train_loss = epoch_summary['loss']
@@ -652,6 +660,7 @@ def train_bc(train_dataloader, val_dataloader, config):
             plot_history(train_history, validation_history, epoch, ckpt_dir, seed)
         if epoch == num_epochs-1:
             # エポックごとにmu, logvarを保存
+            
             np.save(os.path.join(z_output_dir, f"mu_epoch_{epoch}.npy"), np.array(mu_list))
             np.save(os.path.join(z_output_dir, f"logvar_epoch_{epoch}.npy"), np.array(logvar_list))
             print(f"Saved latent variables for epoch {epoch} to {z_output_dir}")

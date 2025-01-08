@@ -64,6 +64,10 @@ def get_args_parser():
     parser.add_argument('--chunk_size', action='store', type=int, help='chunk_size', required=False)
     parser.add_argument('--temporal_agg', action='store_true')
 
+    parser.add_argument('--action_seed', action='store', type=int, help='Action seed for specific configuration', required=False)
+    parser.add_argument('--action_save_dir_num' ,action='store', type=int, required=False)
+
+
     return parser
 
 

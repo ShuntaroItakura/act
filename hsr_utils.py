@@ -2,10 +2,51 @@ import numpy as np
 import torch
 import os
 import h5py
-from torch.utils.data import TensorDataset, DataLoader
+from torch.utils.data import TensorDataset, DataLoader, RandomSampler
 
 import IPython
 e = IPython.embed
+
+class LoggingRandomSampler(RandomSampler):
+    def __init__(self, data_source, log_file=None, replacement=False, generator=None):
+        super().__init__(data_source, replacement=replacement, generator=generator)
+        self.log_file = log_file
+        self.shuffle_indices = []  # シャッフル順序を記録
+
+    def __iter__(self):
+        # シャッフルされたインデックスを取得
+        indices = list(super().__iter__())
+        self.shuffle_indices.append(indices)  # 記録
+        # ログファイルに書き込む
+        if self.log_file is not None:
+            with open(self.log_file, 'a') as f:
+                f.write(f"Shuffled indices: {indices}\n")
+        return iter(indices)
+
+class LoggingRandomSampler(RandomSampler):
+    def __init__(self, data_source, log_file=None, replacement=False, generator=None):
+        super().__init__(data_source, replacement=replacement, generator=generator)
+        self.log_file = log_file
+        self.shuffle_indices = []  # シャッフル順序を記録
+        self.log_line_number = 1  # ログファイルの行番号を管理
+
+    def __iter__(self):
+        # シャッフルされたインデックスを取得
+        indices = list(super().__iter__())
+        self.shuffle_indices.append(indices)  # 記録
+
+        # ログファイルに書き込む
+        if self.log_file is not None:
+            with open(self.log_file, 'a') as f:
+                # 最初の数回はインデックスなしで出力
+                # if self.log_line_number <= 5:
+                #     f.write(f"Shuffled indices: {indices}\n")
+                # else:
+                # インデックス付きで出力
+                f.write(f"{self.log_line_number}:Shuffled indices: {indices}\n")
+                self.log_line_number += 1  # 次の行番号を更新
+
+        return iter(indices)
 
 class EpisodicDataset(torch.utils.data.Dataset):
     def __init__(self, episode_ids, dataset_dir, camera_names, norm_stats):
@@ -143,6 +184,48 @@ def load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_s
 
     return train_dataloader, val_dataloader, norm_stats, train_dataset.is_sim
 
+def load_data_with_logging(dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val, log_file_train, log_file_val):
+    # Obtain normalization stats
+    norm_stats = get_norm_stats(dataset_dir, num_episodes)
+
+    # # Train and validation split
+    # train_indices = np.arange(0, int(0.8 * num_episodes))  # Example split
+    # val_indices = np.arange(int(0.8 * num_episodes), num_episodes)
+    
+    train_ratio = 1
+    shuffled_indices = np.random.permutation(num_episodes)
+    train_indices = shuffled_indices[:int(train_ratio * num_episodes)]
+    # val_indices = shuffled_indices[int(train_ratio * num_episodes):]
+    val_indices = shuffled_indices[:int(train_ratio * num_episodes)]
+
+    # Train dataset
+    train_dataset = EpisodicDataset(train_indices, dataset_dir, camera_names, norm_stats)
+    train_sampler = LoggingRandomSampler(train_dataset, log_file=log_file_train)
+
+    # Validation dataset
+    val_dataset = EpisodicDataset(val_indices, dataset_dir, camera_names, norm_stats)
+    val_sampler = LoggingRandomSampler(val_dataset, log_file=log_file_val)
+
+    # DataLoaders with custom sampler
+    train_dataloader = DataLoader(
+        train_dataset, 
+        batch_size=batch_size_train, 
+        sampler=train_sampler,  # カスタムサンプラーを使用
+        pin_memory=True, 
+        num_workers=1, 
+        prefetch_factor=1
+    )
+
+    val_dataloader = DataLoader(
+        val_dataset, 
+        batch_size=batch_size_val, 
+        sampler=val_sampler, 
+        pin_memory=True, 
+        num_workers=1, 
+        prefetch_factor=1
+    )
+
+    return train_dataloader, val_dataloader, norm_stats
 
 ### env utils
 
@@ -199,6 +282,7 @@ def compute_dict_mean(epoch_dicts):
     for k in result:
         value_sum = 0
         for epoch_dict in epoch_dicts:
+            print('epoch_dict',epoch_dict)
             value_sum += epoch_dict[k]
         result[k] = value_sum / num_items
     a_hat = result['a_hat']

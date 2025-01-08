@@ -2,10 +2,27 @@ import numpy as np
 import torch
 import os
 import h5py
-from torch.utils.data import TensorDataset, DataLoader
+from torch.utils.data import TensorDataset, DataLoader, RandomSampler
 
 import IPython
 e = IPython.embed
+
+
+class LoggingRandomSampler(RandomSampler):
+    def __init__(self, data_source, log_file=None, replacement=False, generator=None):
+        super().__init__(data_source, replacement=replacement, generator=generator)
+        self.log_file = log_file
+        self.shuffle_indices = []  # シャッフル順序を記録
+
+    def __iter__(self):
+        # シャッフルされたインデックスを取得
+        indices = list(super().__iter__())
+        self.shuffle_indices.append(indices)  # 記録
+        # ログファイルに書き込む
+        if self.log_file is not None:
+            with open(self.log_file, 'a') as f:
+                f.write(f"Shuffled indices: {indices}\n")
+        return iter(indices)
 
 class EpisodicDataset(torch.utils.data.Dataset):
     def __init__(self, episode_ids, dataset_dir, camera_names, norm_stats):
@@ -22,7 +39,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         sample_full_episode = False # hardcode
-        # sample_full_episode = True
+        sample_full_episode = True
 
         episode_id = self.episode_ids[index]
         dataset_path = os.path.join(self.dataset_dir, f'episode_{episode_id}.hdf5')
@@ -148,6 +165,49 @@ def load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_s
     return train_dataloader, val_dataloader, norm_stats, train_dataset.is_sim
 
 
+def load_data_with_logging(dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val, log_file_train, log_file_val):
+    # Obtain normalization stats
+    norm_stats = get_norm_stats(dataset_dir, num_episodes)
+
+    # Train and validation split
+    train_ratio = 1
+    shuffled_indices = np.random.permutation(num_episodes)
+    train_indices = shuffled_indices[:int(train_ratio * num_episodes)]
+    # val_indices = shuffled_indices[int(train_ratio * num_episodes):]
+    val_indices = shuffled_indices[:int(train_ratio * num_episodes)]
+    train_indices = np.arange(0, int(train_ratio * num_episodes))
+    val_indices = np.arange(0, int(train_ratio * num_episodes))
+
+    # Train dataset
+    train_dataset = EpisodicDataset(train_indices, dataset_dir, camera_names, norm_stats)
+    train_sampler = LoggingRandomSampler(train_dataset, log_file=log_file_train)
+
+    # Validation dataset
+    val_dataset = EpisodicDataset(val_indices, dataset_dir, camera_names, norm_stats)
+    val_sampler = LoggingRandomSampler(val_dataset, log_file=log_file_val)
+
+    # DataLoaders with custom sampler
+    train_dataloader = DataLoader(
+        train_dataset, 
+        batch_size=batch_size_train, 
+        sampler=train_sampler,  # カスタムサンプラーを使用
+        pin_memory=True, 
+        num_workers=1, 
+        prefetch_factor=1
+    )
+
+    # val_dataloader = DataLoader(
+    #     val_dataset, 
+    #     batch_size=batch_size_val, 
+    #     sampler=val_sampler, 
+    #     pin_memory=True, 
+    #     num_workers=1, 
+    #     prefetch_factor=1
+    # )
+    val_dataset = EpisodicDataset(val_indices, dataset_dir, camera_names, norm_stats)
+    val_dataloader = DataLoader(val_dataset, batch_size=batch_size_val, shuffle=False, pin_memory=True, num_workers=1, prefetch_factor=1)
+
+    return train_dataloader, val_dataloader, norm_stats
 ### env utils
 
 def sample_box_pose():
@@ -192,11 +252,8 @@ def compute_dict_mean(epoch_dicts):
     # print(epoch_dicts,'epoch_dict')
     #mu,logvarように変更
     
-    # epoch_dicts = [epoch_dicts[0][0]]
-    
-    # タプルの最初の要素（辞書）を取得
-    # epoch_dicts = [entry[0] for entry in epoch_dicts]
-    # print(epoch_dicts,'epoch_dict_re')
+    del epoch_dicts[0]['mu']
+    del epoch_dicts[0]['logvar']
 
     result = {k: None for k in epoch_dicts[0]}
     num_items = len(epoch_dicts)

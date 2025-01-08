@@ -48,10 +48,11 @@ class ACTPolicy(nn.Module):
             
             # 予測値を追加
             loss_dict['a_hat'] = a_hat
-            print('h')
+            loss_dict['mu'] = mu
+            loss_dict['logvar'] = logvar
 
-            # return loss_dict,mu,logvar
-            return a_hat,mu,logvar
+            return loss_dict
+            # return a_hat,mu,logvar 
         else: # inference time
             actions = actions[:, :self.model.num_queries]
             is_pad = is_pad[:, :self.model.num_queries]

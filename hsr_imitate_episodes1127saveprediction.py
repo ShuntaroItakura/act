@@ -10,7 +10,7 @@ from einops import rearrange
 
 from hsr_constants import DT
 from hsr_constants import PUPPET_GRIPPER_JOINT_OPEN
-from hsr_utils import load_data # data functions
+from hsr_utils import load_data, load_data_with_logging # data functions
 from hsr_utils import sample_box_pose, sample_insertion_pose # robot functions
 from hsr_utils import compute_dict_mean, set_seed, detach_dict # helper functions
 from hsr_policy import ACTPolicy, CNNMLPPolicy
@@ -49,11 +49,12 @@ import IPython
 e = IPython.embed
 
 def main(args):
-    print(torch.cuda.is_available())  # Trueが期待される
-    print(torch.cuda.device_count()) 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # print(torch.cuda.is_available())  # Trueが期待される
+    # print(torch.cuda.device_count()) 
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    set_seed(1)
+    # set_seed(1)
+    set_seed(8)
     # command line parameters
     is_eval = args['eval']
     ckpt_dir = args['ckpt_dir']
@@ -140,8 +141,19 @@ def main(args):
             print(f'{ckpt_name}: {success_rate=} {avg_return=}')
         print()
         exit()
+    
+    
+    log_file_train = "train_shuffle_log.txt"
+    log_file_val = "val_shuffle_log.txt"
+    log_file_train = os.path.join(ckpt_dir, f"train_shuffle_log.txt")
+    log_file_val = os.path.join(ckpt_dir, f"val_shuffle_log.txt")
 
-    train_dataloader, val_dataloader, stats, _ = load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val)
+    train_dataloader, val_dataloader, stats = load_data_with_logging(
+        dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val, 
+        log_file_train, log_file_val
+    )
+
+    # train_dataloader, val_dataloader, stats, _ = load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val)
 
     # save dataset stats
     if not os.path.isdir(ckpt_dir):
@@ -208,7 +220,7 @@ def eval_bc(config, ckpt_name, save_episode=True):
     ckpt_path = os.path.join(ckpt_dir, ckpt_name)
     policy = make_policy(policy_class, policy_config)
     loading_status = policy.load_state_dict(torch.load(ckpt_path))
-    print(loading_status)
+    # print(loading_status)
     policy.cuda()
     policy.eval()
     print(f'Loaded: {ckpt_path}')
@@ -304,7 +316,7 @@ def eval_bc(config, ckpt_name, save_episode=True):
 
                 ### process previous timestep to get qpos and image_list
                 obs = ts.observation
-                print(obs,'obs')
+                # print(obs,'obs')
                 if 'images' in obs:
                     image_list.append(obs['images'])
                 else:
@@ -375,7 +387,7 @@ def eval_bc(config, ckpt_name, save_episode=True):
                 # whole_body.go()
                 # whole_body.get_current_joint_values()
 
-                print(target_qpos,'aaaa')
+                # print(target_qpos,'aaaa')
 
 
 
@@ -577,7 +589,8 @@ def train_bc(train_dataloader, val_dataloader, config):
             ckpt_path = os.path.join(ckpt_dir, f'policy_epoch_{epoch}_seed_{seed}.ckpt')
             torch.save(policy.state_dict(), ckpt_path)
             plot_history(train_history, validation_history, epoch, ckpt_dir, seed)
-        if epoch == num_epochs-1:
+        # if epoch == num_epochs-1:
+        if (epoch % save_step == 0) or (epoch == num_epochs-1):
             # エポックごとにmu, logvarを保存
             np.save(os.path.join(z_output_dir, f"mu_epoch_{epoch}.npy"), np.array(mu_list))
             np.save(os.path.join(z_output_dir, f"logvar_epoch_{epoch}.npy"), np.array(logvar_list))

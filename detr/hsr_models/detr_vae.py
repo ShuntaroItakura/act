@@ -37,7 +37,7 @@ def get_sinusoid_encoding_table(n_position, d_hid):
 
 class DETRVAE(nn.Module):
     """ This is the DETR module that performs object detection """
-    def __init__(self, backbones, transformer, encoder, state_dim, num_queries, camera_names):
+    def __init__(self, backbones, transformer, encoder, state_dim, num_queries, camera_names,action_seed):
         """ Initializes the model.
         Parameters:
             backbones: torch module of the backbone to be used. See backbone.py
@@ -79,6 +79,9 @@ class DETRVAE(nn.Module):
         self.latent_out_proj = nn.Linear(self.latent_dim, hidden_dim) # project latent sample to embedding
         self.additional_pos_embed = nn.Embedding(2, hidden_dim) # learned position embedding for proprio and latent
 
+
+        self.action_seed = action_seed
+
     def forward(self, qpos, image, env_state, actions=None, is_pad=None):
         """
         qpos: batch, qpos_dim
@@ -114,8 +117,67 @@ class DETRVAE(nn.Module):
             latent_input = self.latent_out_proj(latent_sample)
         else:
             mu = logvar = None
-            latent_sample = torch.zeros([bs, self.latent_dim], dtype=torch.float32).to(qpos.device)
+            # #zeroで初期化
+            # latent_sample = torch.zeros([bs, self.latent_dim], dtype=torch.float32).to(qpos.device)
+            # latent_input = self.latent_out_proj(latent_sample)
+            import os
+            save_dir = "/home/developer/workspace/act/action_gen"  # 保存先ディレクトリ
+            os.makedirs(save_dir, exist_ok=True)  # ディレクトリが存在しなければ作成
+
+            action_seed = self.action_seed
+            action_seed = 1 #10.0
+            # action_seed = 19
+            # torch.manual_seed(action_seed)
+
+
+            # #直接指定
+            # latent_sample = torch.tensor([
+            #     -7.11550377e-03, -2.66585108e-02,  8.75890441e-03, -1.24788098e-02,
+            #     -2.55778618e-03, -1.06805749e-02, -1.95854567e-02,  6.37864694e-03,
+            #     9.72912461e-03, -1.19492970e-02,  2.36698724e-02, -8.35821591e-03,
+            #     -2.23564561e-02,  1.06643727e-02, -3.09453513e-02,  2.25885697e-02,
+            #     2.06271112e-02,  3.52136977e-03, -1.48974285e-02,  2.74876375e-02,
+            #     -4.66053840e-03, -2.01517455e-02,  9.43542272e-03,  7.41586462e-03,
+            #     -2.72641368e-02,  2.24878434e-02,  1.34000182e-02,  9.98892915e-03,
+            #     -1.35897808e-02,  3.40926275e-03,  1.68482084e-02,  1.10635906e-02
+            # ], dtype=torch.float32).to("cuda" if torch.cuda.is_available() else "cpu").unsqueeze(0) 
+                        #直接指定
+            latent_sample = torch.tensor([
+                0.0, 0.0, 0.0, 0.0,
+                0.0, 0.0, 0.0,  0.0,
+                0.0, 0.0,  0.0, 0.0,
+                0.0, 0.0, -3.09453513e-02, 0.0,
+                0.0,0.0,0.0,0.0,
+                0.0,0.0,0.0,0.0,
+                0.0,0.0,0.0,0.0,
+                0.0,0.0,0.02,0.0
+            ], dtype=torch.float32).to("cuda" if torch.cuda.is_available() else "cpu").unsqueeze(0) 
+
+
+            # # 標準正規分布から乱数を生成し、値を大きく変化させるためにスケーリング
+            # scale_factor = 1.0  # 乱数をスケーリングする係数
+            # latent_sample = torch.randn([bs, self.latent_dim], dtype=torch.float32).to(qpos.device) * scale_factor
+            # print('latent_sample (scaled):', latent_sample)
             latent_input = self.latent_out_proj(latent_sample)
+
+            # # サンプリング範囲
+            # value_min = -0.05
+            # value_max = 0.05
+
+            # # 指定範囲内で乱数をサンプリング (-0.05 ~ 0.05)
+            # latent_sample = torch.empty([bs, self.latent_dim], dtype=torch.float32, device=qpos.device).uniform_(value_min, value_max)
+
+            # print('latent_sample (uniform):', latent_sample)
+            
+
+            save_path = os.path.join(save_dir, "latent_samples.txt")
+            with open(save_path, "a") as f:  # 'a'モードで追加書き込み
+                f.write(f'action_seed:{action_seed}\n')
+                # np.savetxt(f, action_seed, fmt="%.6f")
+                np.savetxt(f, latent_sample.cpu().numpy(), fmt="%.6f")
+                f.write("\n")  # サンプル間を区切るための改行
+            latent_input = self.latent_out_proj(latent_sample)
+
 
             # # 推論時にも mu と logvar を計算
             # qpos_embed = self.encoder_joint_proj(qpos)  # (bs, hidden_dim)
@@ -274,6 +336,7 @@ def build(args):
         state_dim=state_dim,
         num_queries=args.num_queries,
         camera_names=args.camera_names,
+        action_seed = args.action_seed
     )
 
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)

@@ -14,7 +14,10 @@ dataset_dir
 *.png
 *.mp4
 *.ckpt
-
+*.json
+*.txt
+action_gen/*
+actions350.txt
 **/.DS_Store
 
 fuse.cfg

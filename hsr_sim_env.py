@@ -99,7 +99,8 @@ class GazeboHSRTask:
             'arm_flex_joint': (-2.62, 0.0),
             'arm_roll_joint': (-2.09, 3.84),
             'wrist_flex_joint': (-1.92, 1.22),
-            'wrist_roll_joint': (-1.92, 3.67)
+            'wrist_roll_joint': (-1.92, 3.67),
+            'hand_motor_joint': (0.0,1.0)
         }
 
     def reset(self):
